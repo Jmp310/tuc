@@ -1,0 +1,113 @@
+# Clash 配置文件 (config.yaml) - 优化版 for China Telecom Mobile
+# 生成时间: 2025-04-28 (基于您的版本修改)
+
+# 基础设置 (基本保持不变)
+mixed-port: 7890
+allow-lan: true # 如果你不需要局域网其他设备连接手机代理，可以设为 false 增强安全性
+mode: Rule
+log-level: warning # 改为 warning 或 error 可以减少日志量，轻微降低系统负担
+ipv6: true         # 保持 true。如果遇到问题可以尝试改为 false 测试
+
+# RESTful API (Web UI 控制接口)
+external-controller: '127.0.0.1:9090'
+# secret: "YOUR_SECRET_HERE" # 强烈建议设置密码
+
+# --- DNS 配置 (重点优化区域) ---
+dns:
+  enable: true
+  listen: 0.0.0.0:53
+  enhanced-mode: redir-host # fake-ip 模式在某些情况下可能更快，但兼容性不如 redir-host，优先使用 redir-host
+  # --- nameserver: 优先使用快速可靠的国内和 DoH/DoT 服务器 ---
+  nameserver:
+    - 223.5.5.5          # AliDNS (国内常用，电信访问通常很快)
+    - 119.29.29.29       # DNSPod (国内常用)
+    - tls://1.0.0.1:853  # Cloudflare DNS over TLS (国外解析备选，更稳定防污染)
+    - https://dns.alidns.com/dns-query # AliDNS over HTTPS (国内 DoH，也可选)
+    # - 8.8.8.8          # Google DNS (作为普通 UDP/TCP 容易被干扰，优先级降低或移除)
+    # - 1.1.1.1          # Cloudflare DNS (同上)
+
+  # --- fallback: 用于查询国外域名或 nameserver 解析失败时，使用可靠的 DoH/DoT ---
+  fallback:
+    - tls://1.0.0.1:853  # Cloudflare (TLS)
+    - https://dns.google/dns-query # Google (HTTPS)
+    - https://dns.alidns.com/dns-query # AliDNS (HTTPS) - 作为 fallback 也可以
+
+  # --- fallback-filter: 优化，增加 geosite:cn 确保国内域名强制走 nameserver ---
+  fallback-filter:
+    geoip: true
+    geoip-code: CN
+    geosite: # 增加 geosite:cn 列表，明确指定哪些域名列表必须使用 nameserver 解析 (通常就是国内站点)
+      - cn
+    ipcidr:
+      - 240.0.0.0/4
+      - 127.0.0.0/8
+      - 192.168.0.0/16 # 确认这是你的局域网段
+      - 10.0.0.0/8
+      - 172.16.0.0/12
+
+# 代理节点列表 (Proxies) - 保持不变
+proxies:
+  - name: "gcp"  # 您可以自定义节点名称
+    type: vless
+    server: 34.81.120.206
+    port: 31478
+    uuid: d06698ee-2fb6-4ff7-a805-77d892c39d18
+    network: tcp
+    tls: true
+    flow: xtls-rprx-vision
+    client-fingerprint: chrome
+    servername: www.apple.com # SNI
+    reality-opts:
+      public-key: siEkxexwmBBk3mW8NkbTyHca4G_pG1qdmsJ_4s_EFyo
+      short-id: 6ba85179e30d4fc2
+
+# 代理组配置 (Proxy Groups) - 结构保持不变，确保名称引用正确
+proxy-groups:
+  - name: "🚀 Proxy"
+    type: select
+    proxies:
+      - "gcp"
+      - DIRECT
+
+  - name: "🌍 Overseas"
+    type: select
+    proxies:
+      - "🚀 Proxy"
+      - DIRECT
+
+  - name: "🇨🇳 Mainland"
+    type: select
+    proxies:
+      - DIRECT
+      - "🚀 Proxy"
+
+  # (可选) 广告拦截组 - 如果需要，可以取消注释
+  - name: "🚫 Ads"
+    type: select
+    proxies:
+      - REJECT # REJECT 直接拒绝连接，比 DIRECT 更彻底
+      - DIRECT
+
+# 规则 (Rules) - 结构保持不变，确保 GEO 文件最新
+# 确保你的 Clash 客户端可以访问最新的 Country.mmdb 和 geosite.dat 文件
+rules:
+  # --- 广告拦截规则 (可选) ---
+  # - GEOSITE,category-ads-all,🚫 Ads # 使用更全面的广告列表
+
+  # --- 直连规则 (基本不变) ---
+  - DOMAIN,localhost,DIRECT
+  - IP-CIDR,127.0.0.0/8,DIRECT
+  - IP-CIDR,192.168.0.0/16,DIRECT # 确认你的局域网段
+  - IP-CIDR,10.0.0.0/8,DIRECT
+  - IP-CIDR,172.16.0.0/12,DIRECT
+  - IP-CIDR,::1/128,DIRECT
+  - IP-CIDR,fc00::/7,DIRECT
+  - IP-CIDR,fe80::/10,DIRECT
+
+  # --- 国内/私有 规则 ---
+  - GEOSITE,private,DIRECT            # 私有、特殊域名优先直连
+  - GEOSITE,cn,🇨🇳 Mainland            # 国内域名列表 -> Mainland 组 (默认 DIRECT)
+  - GEOIP,CN,🇨🇳 Mainland              # 国内 IP -> Mainland 组 (默认 DIRECT)
+
+  # --- 最终匹配规则 ---
+  - MATCH,🌍 Overseas                 # 其他所有流量 -> Overseas 组 (默认 🚀 Proxy -> SSR-TW)
